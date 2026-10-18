@@ -138,6 +138,13 @@ void InputManager::begin() {
     pinMode(BoardConfig::ACTIVE.input.power, BoardConfig::ACTIVE.input.powerActiveHigh ? INPUT_PULLDOWN : INPUT_PULLUP);
   }
 #endif
+#if FREEINK_DEVICE_UT37
+  // UT37 SIDEKEY (GPIO17) is active-HIGH with an external 100k pull-down; the
+  // generic INPUT_PULLUP above would fight it and read as held.
+  if (BoardConfig::ACTIVE.board == BoardConfig::Board::Ut37 && BoardConfig::ACTIVE.input.power >= 0) {
+    pinMode(BoardConfig::ACTIVE.input.power, BoardConfig::ACTIVE.input.powerActiveHigh ? INPUT_PULLDOWN : INPUT_PULLUP);
+  }
+#endif
   beginTouch();
 }
 
@@ -334,9 +341,9 @@ uint8_t InputManager::getDigitalState() const {
   if (isDigitalPressed(BoardConfig::ACTIVE.input.right)) state |= (1 << BTN_RIGHT);
   if (isDigitalPressed(BoardConfig::ACTIVE.input.up)) state |= (1 << BTN_UP);
   if (isDigitalPressed(BoardConfig::ACTIVE.input.down)) state |= (1 << BTN_DOWN);
-#if FREEINK_DEVICE_EEGO_A4
-  if (BoardConfig::ACTIVE.board == BoardConfig::Board::EegoA4) {
-    // A4 power key: self-contained polarity-aware read. The generic
+#if FREEINK_DEVICE_EEGO_A4 || FREEINK_DEVICE_UT37
+  if (BoardConfig::ACTIVE.board == BoardConfig::Board::EegoA4 || BoardConfig::ACTIVE.board == BoardConfig::Board::Ut37) {
+    // A4/UT37 power key: self-contained polarity-aware read. The generic
     // LOW-active fallback below must never see A4's idle pull-down level —
     // it would report the un-pressed key as held forever (root cause of the
     // 4508ms boot-time sleep on 118aa1e0). Non-A4 boards keep upstream logic.

@@ -68,6 +68,7 @@ class Uc8253MurphyDriver : public PanelDriver {
  private:
   void initController(EpdBus& bus);
   void loadLut(EpdBus& bus, const Uc8253MurphyLutBank& bank);
+  void displayUt37(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, RefreshMode mode, bool turnOff);
   void writePlane(EpdBus& bus, uint8_t command, const uint8_t* fb);  // rotates 416x240 fb -> 240x416 RAM
   void triggerRefresh(EpdBus& bus, bool turnOff);
 

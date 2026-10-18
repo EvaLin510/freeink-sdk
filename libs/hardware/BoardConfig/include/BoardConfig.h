@@ -53,6 +53,10 @@
 #ifndef FREEINK_DEVICE_DELINK
 #define FREEINK_DEVICE_DELINK 0
 #endif
+// UT37: Murphy-family variant; env sets BOTH FREEINK_DEVICE_MURPHY and FREEINK_DEVICE_UT37.
+#ifndef FREEINK_DEVICE_UT37
+#define FREEINK_DEVICE_UT37 0
+#endif
 #ifndef FREEINK_DEVICE_LILYGO
 #define FREEINK_DEVICE_LILYGO 0
 #endif
@@ -386,6 +390,7 @@ enum class Board : uint8_t {
   M5StackPaperColor,
   MurphyM3,
   MurphyM4,
+  Ut37,  // UT37 3.7in reader
   DeLink,
   LilyGoT5S3,
   M5PaperV11,
@@ -1085,6 +1090,40 @@ constexpr BoardProfile MURPHY_M3 = {
     NO_LEDS,
     NO_FLIP,
     NO_SDMMC,
+    NO_GAUGE};
+
+
+// --- UT37 (3.7" 240x416 UC8253, ESP32-S3R8) ---------------------------------
+// Pins from SCH_Schematic1_1_2026-08-30. GPIO33-37 belong to the octal PSRAM;
+// GPIO19/20 are native USB. Touch is disabled until the controller is confirmed
+// on hardware (I2C scan on GPIO12/13, INT on GPIO21).
+constexpr BoardProfile UT37 = {
+    Board::Ut37,
+    "ut37",
+    InputStyle::DigitalButtons,
+    DisplayController::UC8253,
+    416,  // landscape framebuffer, same convention as the Murphy M3 driver
+    240,
+    {4, 5, 3, 2, 0, 1, PIN_UNASSIGNED},  // sclk, mosi, cs, dc, rst, busy
+    0,
+    // GPIO42 (TOUCH_WAKE/SD_WAKE) -> R4 -> Q1 gate: Q1 grounds the SD card (SD_GND). Active-HIGH.
+    {PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, 42, false, 0, true},
+    // back, confirm, left, right, up, down, power, powerActiveHigh
+    // SIDEKEY=GPIO17 (RTC, wakes from deep sleep) -> power. SW2 switches it to VCC_3V3 with
+    // R99 100k to GND, so it is ACTIVE-HIGH. SIDEKEY1 (GPIO46) is a net label with no switch
+    // on the schematic (one key was removed in rev 2.0), so it stays unassigned.
+    {PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, 17, true},
+    14,              // batteryAdc (ADC2_CH3): 330k/100k divider
+    PIN_UNASSIGNED,  // charger STAT only drives LED2
+    4.3f,            // (330k+100k)/100k
+    PIN_UNASSIGNED,
+    NO_TOUCH,
+    {45, 25000, 10, true},  // LED_PWM
+    {AudioOutput::None, PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, true,
+     PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, 0, 18},  // GPIO18 PA_EN/BUZZER (electromagnetic)
+    NO_LEDS,
+    NO_FLIP,
+    {38, 39, 47, 48, 41, 40, 4},  // SDMMC clk, cmd, d0, d1, d2, d3, 4-bit
     NO_GAUGE};
 
 // --- de-link (X4-class GDEQ0426T82 panel on ESP32-S3) — SSD1677 + frontlight ---
@@ -1821,6 +1860,8 @@ constexpr BoardProfile DEFAULT_DEVICE = PAPER_MONO;
 constexpr BoardProfile DEFAULT_DEVICE = M5STACK_PAPER_COLOR;
 #elif FREEINK_DEVICE_MURPHY_M4
 constexpr BoardProfile DEFAULT_DEVICE = MURPHY_M4;
+#elif FREEINK_DEVICE_UT37
+constexpr BoardProfile DEFAULT_DEVICE = UT37;
 #elif FREEINK_DEVICE_MURPHY
 constexpr BoardProfile DEFAULT_DEVICE = MURPHY_M3;
 #elif FREEINK_DEVICE_DELINK
@@ -1881,6 +1922,11 @@ inline bool selectDevice(Board which) {
 #if FREEINK_DEVICE_MURPHY
     case Board::MurphyM3:
       ACTIVE = MURPHY_M3;
+      break;
+#endif
+#if FREEINK_DEVICE_UT37
+    case Board::Ut37:
+      ACTIVE = UT37;
       break;
 #endif
 #if FREEINK_DEVICE_MURPHY_M4

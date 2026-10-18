@@ -147,6 +147,11 @@ void Uc8253MurphyDriver::display(EpdBus& bus, const uint8_t* fb, const uint8_t* 
   _isScreenOn = false;
   initController(bus);
 
+  if (BoardConfig::ACTIVE.board == BoardConfig::Board::Ut37) {
+    displayUt37(bus, fb, prev, mode, turnOff);
+    return;
+  }
+
   // FAST (DU) ghosts over time, so promote to a full (GC) refresh every
   // ghostClearInterval refreshes.
   bool useFast = (mode == RefreshMode::Fast);
@@ -176,6 +181,37 @@ void Uc8253MurphyDriver::display(EpdBus& bus, const uint8_t* fb, const uint8_t* 
     writePlane(bus, CMD_DTM2, fb);
   }
 
+  triggerRefresh(bus, turnOff);
+}
+
+// UT37 (vendor XZ035B UC8253C reference): a changed pixel must see old->DTM1 and
+// new->DTM2 so the BW/WB transition waveforms fire. Writing the new frame to both
+// planes runs only the WW/BB "hold" waveforms, which on this panel leave the
+// previous image ghosted underneath. FULL refreshes, and any refresh without a
+// previous frame, use the vendor 5S power-on clear: both planes = new, and its
+// WW/BB shake every pixel to its target, clearing an unknown prior image.
+void Uc8253MurphyDriver::displayUt37(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, RefreshMode mode,
+                                     bool turnOff) {
+  static const Uc8253MurphyLutBank clear5s = {UT37_LUT_20_5S, UT37_LUT_21_5S, UT37_LUT_22_5S, UT37_LUT_23_5S,
+                                              UT37_LUT_24_5S};
+  if (mode == RefreshMode::Full || prev == nullptr) {
+    _fastRefreshCount = 0;
+    loadLut(bus, clear5s);
+    writePlane(bus, CMD_DTM1, fb);
+    writePlane(bus, CMD_DTM2, fb);
+    triggerRefresh(bus, turnOff);
+    return;
+  }
+
+  bool useFast = (mode == RefreshMode::Fast);
+  if (useFast && _cfg.ghostClearInterval != 0 && _fastRefreshCount >= _cfg.ghostClearInterval) {
+    useFast = false;
+  }
+  _fastRefreshCount = useFast ? _fastRefreshCount + 1 : 0;
+
+  loadLut(bus, useFast ? _cfg.fast : _cfg.def);
+  writePlane(bus, CMD_DTM1, prev);
+  writePlane(bus, CMD_DTM2, fb);
   triggerRefresh(bus, turnOff);
 }
 

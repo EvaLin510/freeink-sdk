@@ -85,9 +85,12 @@ bool SdmmcBlockDevice::begin(const BoardConfig::SdmmcPins& pins) {
   esp_err_t mountErr = ESP_FAIL;
   for (int attempt = 0; attempt < 4; attempt++) {
     if (sdPwr >= 0) {
-      digitalWrite(sdPwr, HIGH);
+      // Polarity-aware power cycle: OFF level, wait, then ON level (held while running).
+      // Active-LOW boards (X4 Pro/X4C) behave exactly as before: HIGH -> LOW.
+      const bool sdOnHigh = BoardConfig::ACTIVE.sd.powerActiveHigh;
+      digitalWrite(sdPwr, sdOnHigh ? LOW : HIGH);
       delay(80);
-      digitalWrite(sdPwr, LOW);  // run with the enable held LOW
+      digitalWrite(sdPwr, sdOnHigh ? HIGH : LOW);
       delay(120);
     }
     esp_err_t e = sdmmc_card_init(&host, card);
