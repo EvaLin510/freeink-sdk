@@ -1696,6 +1696,16 @@ void InputManager::beginFt5x06() {
   // ESP GPIOs — raise/release them before the probe below.
   freeink::papermono::enableTouch();
 #endif
+  // Boards that gate the controller from an ESP GPIO (UT37: GPIO42 TOUCH_WAKE,
+  // shared with the SD power gate) raise it to its ON level first. gpio_hold_dis:
+  // the sleep path holds this pin OFF and the hold survives the wake reset. The
+  // FT6336 then needs up to ~300 ms after reset before its I2C interface answers.
+  if (t.powerEnable >= 0) {
+    gpio_hold_dis(static_cast<gpio_num_t>(t.powerEnable));
+    pinMode(t.powerEnable, OUTPUT);
+    digitalWrite(t.powerEnable, t.powerEnableActiveHigh ? HIGH : LOW);
+    delay(300);
+  }
 
   // The bus is shared with M5PM1/M5IOE1/RX8130, whose standing profile is
   // 100 kHz. FT6336 accepts that rate even though M5GFX uses 400 kHz for its

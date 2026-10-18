@@ -1095,8 +1095,8 @@ constexpr BoardProfile MURPHY_M3 = {
 
 // --- UT37 (3.7" 240x416 UC8253, ESP32-S3R8) ---------------------------------
 // Pins from SCH_Schematic1_1_2026-08-30. GPIO33-37 belong to the octal PSRAM;
-// GPIO19/20 are native USB. Touch is disabled until the controller is confirmed
-// on hardware (I2C scan on GPIO12/13, INT on GPIO21).
+// GPIO19/20 are native USB. Touch is an FT6336U at I2C 0x40 (identified on
+// hardware and from the OEM firmware's touch task).
 constexpr BoardProfile UT37 = {
     Board::Ut37,
     "ut37",
@@ -1117,7 +1117,14 @@ constexpr BoardProfile UT37 = {
     PIN_UNASSIGNED,  // charger STAT only drives LED2
     4.3f,            // (330k+100k)/100k
     PIN_UNASSIGNED,
-    NO_TOUCH,
+    // FocalTech FT6336U (chip id 0xA3=0x64) strapped to I2C 0x40, on GPIO13/12 with
+    // INT on GPIO21 (low pulses while touched). GPIO42 (TOUCH_WAKE/SD_WAKE) is its
+    // reset/wake line and also gates SD power, so it is driven HIGH, never pulsed.
+    // Raw frames are portrait panel pixels (x 0..239, y 0..415, origin top-left with
+    // USB at the bottom); swap + flipY maps them onto the 416x240 landscape panel
+    // frame that GfxRenderer rotates back to portrait.
+    {TouchController::Ft5x06, 13, 12, 21, PIN_UNASSIGNED, 0x40, 0, 415, 0, 239, false, 0, true, false, 42, true,
+     false, true, false, true},
     {45, 25000, 10, true},  // LED_PWM
     {AudioOutput::None, PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, true,
      PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, 0, 18},  // GPIO18 PA_EN/BUZZER (electromagnetic)

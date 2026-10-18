@@ -103,6 +103,10 @@ void Uc8253MurphyDriver::triggerRefresh(EpdBus& bus, bool turnOff) {
 }
 
 void Uc8253MurphyDriver::initController(EpdBus& bus) {
+  if (BoardConfig::ACTIVE.board == BoardConfig::Board::Ut37) {
+    initControllerUt37(bus);
+    return;
+  }
   bus.cmd(CMD_POWER_SETTING);
   bus.data(0x03);
   bus.data(0x10);
@@ -129,6 +133,41 @@ void Uc8253MurphyDriver::initController(EpdBus& bus) {
   bus.cmd(CMD_VCOM_DATA_INTERVAL);
   bus.data(0x97);
 
+}
+
+// UT37 follows the vendor XZ035B UC8253C reference order: panel setting first,
+// then power and booster, then power-on. Measured on hardware: the Murphy booster
+// soft-start (D7 D7 1F) stretches PON to 2.6-4.5 s on this panel, and sending PON
+// before the panel setting never completes (30 s BUSY timeout). The vendor values
+// power on in ~17 ms. PSR keeps 0xFF (UD=1) because writePlane()'s rotation was
+// validated with that gate-scan direction.
+void Uc8253MurphyDriver::initControllerUt37(EpdBus& bus) {
+  bus.cmd(CMD_PANEL_SETTING);
+  bus.data(0xFF);
+  bus.data(0x01);
+  bus.cmd(CMD_POWER_SETTING);
+  bus.data(0x03);
+  bus.data(0x10);
+  bus.data(0x3F);
+  bus.data(0x3F);
+  bus.data(0x03);
+  bus.cmd(CMD_BOOSTER_SOFT_START);
+  bus.data(0x17);
+  bus.data(0x37);
+  bus.data(0x3D);
+  bus.cmd(CMD_PLL_CONTROL);
+  bus.data(0x09);
+  bus.cmd(CMD_RESOLUTION);
+  bus.data(0xF0);  // 240 wide
+  bus.data(0x01);  // 0x01A0 = 416 tall
+  bus.data(0xA0);
+  bus.cmd(CMD_VCOM_DC);
+  bus.data(0x07);
+  bus.cmd(CMD_VCOM_DATA_INTERVAL);
+  bus.data(0xD7);
+  bus.cmd(CMD_POWER_ON);
+  bus.waitBusy(" UT37_PON");
+  _isScreenOn = true;
 }
 
 void Uc8253MurphyDriver::begin(EpdBus& bus) {
