@@ -19,6 +19,9 @@ class Buzzer {
  public:
   static constexpr uint32_t kDefaultBeepFreq = 2000;  // Hz
   static constexpr uint32_t kDefaultBeepMs = 80;
+  // Half of ledcWriteTone's 50 % square wave: a quieter prompt that also keeps
+  // the UT37's 3V3 rail out of brown-out (long 50 % tones reset that board).
+  static constexpr uint8_t kDefaultBeepDutyPercent = 25;
 
   // Attaches LEDC to the buzzer pin. Returns false when the active board has no
   // buzzer.
@@ -29,8 +32,18 @@ class Buzzer {
   // then stops; durationMs == 0 starts a continuous tone (end it with noTone()).
   void tone(uint32_t freqHz, uint32_t durationMs = 0);
 
-  // A short default beep (kDefaultBeepFreq for kDefaultBeepMs).
-  void beep() { tone(kDefaultBeepFreq, kDefaultBeepMs); }
+  // A short, quiet default beep (kDefaultBeepFreq for kDefaultBeepMs at
+  // kDefaultBeepDutyPercent). Blocks for kDefaultBeepMs.
+  void beep() {
+    startTone(kDefaultBeepFreq, kDefaultBeepDutyPercent);
+    delay(kDefaultBeepMs);
+    noTone();
+  }
+
+  // Starts a non-blocking square wave at freqHz with the given duty (1-50 %).
+  // A lower duty draws less current from boards whose 3V3 rail sags under a
+  // 50 % electromagnetic buzzer load (UT37). End it with noTone().
+  void startTone(uint32_t freqHz, uint8_t dutyPercent);
 
   // Silences a continuous tone.
   void noTone();

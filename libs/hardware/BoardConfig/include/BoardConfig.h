@@ -631,7 +631,7 @@ struct MicConfig {
   bool enableActiveHigh;
 };
 
-enum class RtcType : uint8_t { None, Pcf8563, Pcf85063, Ds3231, Rx8130, Rx8010 };
+enum class RtcType : uint8_t { None, Pcf8563, Pcf85063, Ds3231, Rx8130, Rx8010, Rx8025t };
 enum class ImuType : uint8_t { None, Lsm6ds3, Qmi8658 };
 
 // On-board I2C sensors sharing one bus (e.g. the Sticky's RTC + temp/humidity +
@@ -1131,7 +1131,11 @@ constexpr BoardProfile UT37 = {
     NO_LEDS,
     NO_FLIP,
     {38, 39, 47, 48, 41, 40, 4},  // SDMMC clk, cmd, d0, d1, d2, d3, 4-bit
-    NO_GAUGE};
+    NO_GAUGE,
+    {MicInput::None, PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, true},
+    // RX8025T-UB RTC at 0x32 on the shared touch bus (GPIO13/12, Wire). AHT30 (0x38)
+    // has no driver yet, so tempHumidityAddr stays 0.
+    {13, 12, 100000, 0x32, 0, 0, 0, RtcType::Rx8025t, ImuType::None}};
 
 // --- de-link (X4-class GDEQ0426T82 panel on ESP32-S3) — SSD1677 + frontlight ---
 // Reuses the SSD1677 driver (same controller/panel as X4); differs at the board

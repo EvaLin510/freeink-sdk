@@ -32,6 +32,14 @@ void Buzzer::tone(uint32_t freqHz, uint32_t durationMs) {
   }
 }
 
+void Buzzer::startTone(uint32_t freqHz, uint8_t dutyPercent) {
+  if (!begun_ || freqHz == 0) return;
+  if (dutyPercent == 0) dutyPercent = 1;
+  if (dutyPercent > 50) dutyPercent = 50;
+  if (!ledcChangeFrequency(buzzerPin(), freqHz, LEDC_RESOLUTION_BITS)) return;
+  ledcWrite(buzzerPin(), ((1u << LEDC_RESOLUTION_BITS) * dutyPercent) / 100u);
+}
+
 void Buzzer::noTone() {
   if (!begun_) return;
   ledcWriteTone(buzzerPin(), 0);
@@ -52,6 +60,7 @@ void Buzzer::end() {
 namespace freeink {
 bool Buzzer::begin() { return false; }
 void Buzzer::tone(uint32_t, uint32_t) {}
+void Buzzer::startTone(uint32_t, uint8_t) {}
 void Buzzer::noTone() {}
 void Buzzer::end() {}
 }  // namespace freeink

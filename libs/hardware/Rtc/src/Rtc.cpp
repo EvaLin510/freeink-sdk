@@ -44,6 +44,25 @@ constexpr uint8_t RX8010_REG_TIME = 0x10;
 constexpr uint8_t RX8010_REG_FLAG = 0x1E;
 constexpr uint8_t RX8010_FLAG_VLF = 0x02;
 
+// Epson RX8025T-UB register map (UT37): time at 0x00 (one-hot weekday), unlike
+// the RX8010/RX8130 which start at 0x10.
+constexpr uint8_t RX8025T_REG_TIME = 0x00;
+constexpr uint8_t RX8025T_REG_EXTENSION = 0x0D;
+constexpr uint8_t RX8025T_REG_FLAG = 0x0E;
+constexpr uint8_t RX8025T_REG_CONTROL = 0x0F;
+constexpr uint8_t RX8025T_FLAG_VLF = 0x02;  // oscillator stopped / supply lost: time invalid
+// Power-on defaults the datasheet asks for after VLF: no timer/alarm/update
+// interrupts, temperature compensation every 2 s (CSEL=01).
+constexpr uint8_t RX8025T_EXTENSION_DEFAULT = 0x00;
+constexpr uint8_t RX8025T_CONTROL_DEFAULT = 0x40;
+
+uint8_t weekdayFromOneHot(uint8_t mask) {
+  for (uint8_t i = 0; i < 7; ++i) {
+    if (mask & (1u << i)) return i;
+  }
+  return 0;
+}
+
 bool g_wireReady[2] = {false, false};
 
 TwoWire& sensorWire() {
@@ -143,6 +162,9 @@ bool Rtc::begin() {
       break;
     case BoardConfig::RtcType::Rx8010:
       return false;
+    case BoardConfig::RtcType::Rx8025t:
+      if (!readRegs(addr, RX8025T_REG_FLAG, &status, 1)) return false;
+      break;
     case BoardConfig::RtcType::None:
       return false;
   }
@@ -242,6 +264,19 @@ bool Rtc::now(DateTime& out) {
       return false;
 #endif
     }
+    case BoardConfig::RtcType::Rx8025t: {
+      uint8_t flag = 0;
+      if (!readRegs(addr, RX8025T_REG_FLAG, &flag, 1) || (flag & RX8025T_FLAG_VLF)) return false;
+      if (!readRegs(addr, RX8025T_REG_TIME, raw, sizeof(raw))) return false;
+      out.second = bcdToDec(raw[0] & 0x7FU);
+      out.minute = bcdToDec(raw[1] & 0x7FU);
+      out.hour = bcdToDec(raw[2] & 0x3FU);
+      out.weekday = weekdayFromOneHot(raw[3]);
+      out.day = bcdToDec(raw[4] & 0x3FU);
+      out.month = bcdToDec(raw[5] & 0x1FU);
+      out.year = static_cast<uint16_t>(2000 + bcdToDec(raw[6]));
+      return true;
+    }
     case BoardConfig::RtcType::None:
       return false;
   }
@@ -285,6 +320,32 @@ bool Rtc::set(const DateTime& dt) {
   }
 #endif
   if (s.rtcType == BoardConfig::RtcType::Rx8010) return false;
+  if (s.rtcType == BoardConfig::RtcType::Rx8025t) {
+    if (dt.year < 2000 || dt.year > 2099) return false;
+    uint8_t flag = 0;
+    if (!readRegs(addr, RX8025T_REG_FLAG, &flag, 1)) return false;
+    if (flag & RX8025T_FLAG_VLF) {
+      // First set after a supply loss: the other registers are undefined too.
+      if (!writeReg(addr, RX8025T_REG_EXTENSION, RX8025T_EXTENSION_DEFAULT) ||
+          !writeReg(addr, RX8025T_REG_CONTROL, RX8025T_CONTROL_DEFAULT)) {
+        return false;
+      }
+    }
+    ensureWire();
+    auto& wire = sensorWire();
+    wire.beginTransmission(addr);
+    wire.write(RX8025T_REG_TIME);
+    wire.write(decToBcd(dt.second));
+    wire.write(decToBcd(dt.minute));
+    wire.write(decToBcd(dt.hour));
+    wire.write(static_cast<uint8_t>(1u << (dt.weekday % 7u)));
+    wire.write(decToBcd(dt.day));
+    wire.write(decToBcd(dt.month));
+    wire.write(decToBcd(static_cast<uint8_t>(dt.year % 100)));
+    if (wire.endTransmission() != 0) return false;
+    // Clear VLF (and the stale VDET/alarm/timer/update flags) so now() trusts the time.
+    return writeReg(addr, RX8025T_REG_FLAG, 0x00);
+  }
   const uint8_t centuryBit = dt.year < 2000 ? 0x80U : 0x00U;
   ensureWire();
   auto& wire = sensorWire();
