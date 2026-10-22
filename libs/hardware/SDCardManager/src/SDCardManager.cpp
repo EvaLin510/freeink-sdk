@@ -76,6 +76,21 @@ bool SDCardManager::begin() {
   return initialized;
 }
 
+SDCardManager::CardChange SDCardManager::pollCardChange() {
+  if (!_dev) return CardChange::None;
+  if (!cardLost) {
+    // Not mounted (sleep shutdown, USB-MSC owner, failed boot mount): nothing to watch.
+    if (!initialized || _dev->cardResponding()) return CardChange::None;
+    cardLost = true;
+    if (Serial) Serial.printf("[%lu] [SD] card stopped responding (removed?)\n", millis());
+    return CardChange::Removed;
+  }
+  if (!_dev->probeReinsertedCard()) return CardChange::None;
+  cardLost = false;
+  if (Serial) Serial.printf("[%lu] [SD] card answers again (reinserted)\n", millis());
+  return CardChange::Reinserted;
+}
+
 FsBlockDeviceInterface* SDCardManager::detachFilesystemForRawAccess() {
   if (!initialized || !_dev) return nullptr;
   _vol.end();
@@ -208,6 +223,8 @@ bool SDCardManager::begin() {
 
   return initialized;
 }
+
+SDCardManager::CardChange SDCardManager::pollCardChange() { return CardChange::None; }
 #endif
 
 bool SDCardManager::ready() const { return initialized; }

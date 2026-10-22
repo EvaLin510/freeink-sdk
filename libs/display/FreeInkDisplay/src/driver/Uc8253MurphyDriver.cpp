@@ -183,8 +183,21 @@ void Uc8253MurphyDriver::initControllerUt37(EpdBus& bus) {
   _isScreenOn = true;
 }
 
+// The Murphy M3 panel wants a fixed 200 ms settle after reset. The UT37 panel is
+// ready as soon as BUSY goes high (vendor XZ035B reference: RESET, then READBUSY;
+// measured on hardware: BUSY high within 0-1 ms), so it waits on BUSY instead and
+// saves ~190 ms on every refresh, since the driver resets before each one.
+void Uc8253MurphyDriver::resetController(EpdBus& bus) {
+  if (BoardConfig::ACTIVE.board == BoardConfig::Board::Ut37) {
+    bus.reset(0);
+    bus.waitBusy(" UT37_RST");
+    return;
+  }
+  bus.reset(200);
+}
+
 void Uc8253MurphyDriver::begin(EpdBus& bus) {
-  bus.reset(200);  // Murphy panel wants a long post-reset settle
+  resetController(bus);
   _isScreenOn = false;
   _fastRefreshCount = 0;
   initController(bus);
@@ -195,7 +208,7 @@ void Uc8253MurphyDriver::display(EpdBus& bus, const uint8_t* fb, const uint8_t* 
   // every refresh. The UC8253 retains LUT/RAM state between refreshes, and reusing
   // it leaves pixels half-latched (the previous frame bleeds through / flashes
   // without settling). A fresh reset+init each time clears that residue.
-  bus.reset(200);
+  resetController(bus);
   _isScreenOn = false;
   initController(bus);
 
@@ -242,7 +255,10 @@ void Uc8253MurphyDriver::display(EpdBus& bus, const uint8_t* fb, const uint8_t* 
 // previous image ghosted underneath.
 //   Full                 -> 5S power-on clear (both planes = new)
 //   Half                 -> GC (old -> DTM1, new -> DTM2)
-//   Fast                 -> DU, promoted to GC every ghostClearInterval refreshes
+//   Fast                 -> DU (old -> DTM1, new -> DTM2), never promoted
+// Unlike the Murphy M3 path there is no driver-side ghostClearInterval: how often
+// a ghost-clearing refresh happens is the user's "refresh every N pages" setting
+// (the reader requests HALF), and rolling updates request their own HALF.
 // The old frame is the caller's prev, or the driver's copy of the last frame in
 // single-buffer builds. Only the first refresh after boot, when the panel content
 // is unknown, has neither and uses the 5S clear.
@@ -250,25 +266,28 @@ void Uc8253MurphyDriver::displayUt37(EpdBus& bus, const uint8_t* fb, const uint8
                                      bool turnOff) {
   static const Uc8253MurphyLutBank clear5s = {UT37_LUT_20_5S, UT37_LUT_21_5S, UT37_LUT_22_5S, UT37_LUT_23_5S,
                                               UT37_LUT_24_5S};
+  static const Uc8253MurphyLutBank du = {MURPHY_LUT_20_FAST, MURPHY_LUT_21_FAST, MURPHY_LUT_22_FAST,
+                                         MURPHY_LUT_23_FAST, UT37_LUT_24_DU};
 #if FREEINK_DEVICE_UT37
   if (prev == nullptr && g_ut37LastFrameValid && geometry().bufferSize == UT37_FRAME_BYTES) prev = g_ut37LastFrame;
 #endif
   if (mode == RefreshMode::Full || prev == nullptr) {
-    _fastRefreshCount = 0;
     loadLut(bus, clear5s);
     writePlane(bus, CMD_DTM1, fb);
     writePlane(bus, CMD_DTM2, fb);
   } else {
-    bool useFast = (mode == RefreshMode::Fast);
-    if (useFast && _cfg.ghostClearInterval != 0 && _fastRefreshCount >= _cfg.ghostClearInterval) {
-      useFast = false;
-    }
-    _fastRefreshCount = useFast ? _fastRefreshCount + 1 : 0;
-    loadLut(bus, useFast ? _cfg.fast : _cfg.def);
+    loadLut(bus, mode == RefreshMode::Fast ? du : _cfg.def);
     writePlane(bus, CMD_DTM1, prev);
     writePlane(bus, CMD_DTM2, fb);
   }
-  triggerRefresh(bus, turnOff);
+  // Always power the panel off and put the controller in deep sleep afterwards:
+  // every UT37 refresh starts with a hardware reset + re-init + PON (~20 ms), so
+  // keeping the booster running between page turns (turnOff == false) only burns
+  // current for the whole time a page is being read.
+  (void)turnOff;
+  triggerRefresh(bus, /*turnOff=*/true);
+  bus.cmd(CMD_DEEP_SLEEP);
+  bus.data(0xA5);
 #if FREEINK_DEVICE_UT37
   if (geometry().bufferSize == UT37_FRAME_BYTES) {
     memcpy(g_ut37LastFrame, fb, UT37_FRAME_BYTES);

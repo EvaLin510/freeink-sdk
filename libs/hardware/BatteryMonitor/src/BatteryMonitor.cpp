@@ -4,11 +4,15 @@
 #include <BoardConfig.h>
 #include <M5Pm1.h>
 #include <esp_idf_version.h>
+#if FREEINK_DEVICE_UT37
+#include <driver/usb_serial_jtag.h>
+#endif
 #if ESP_IDF_VERSION_MAJOR < 5
 #include <esp_adc_cal.h>
 #endif
 
 #include <algorithm>
+#include <iterator>
 #include <cmath>
 
 #if FREEINK_BATTERY_I2C_GAUGE
@@ -467,6 +471,19 @@ uint16_t BatteryMonitor::readMillivolts() const {
     delay(5);
     mv = analogReadMilliVolts(_adcPin);
     digitalWrite(ce, activeHigh ? HIGH : LOW);  // resume charging
+  } else if (BoardConfig::ACTIVE.board == BoardConfig::Board::Ut37) {
+    // OEM UT37 firmware: 16 samples ~200 us apart, sorted, the 2 highest and 2
+    // lowest dropped, the middle 12 averaged. A single read wandered tens of mV
+    // (worse right after an e-ink refresh), which made the percentage jump.
+    uint16_t samples[16];
+    for (uint16_t& sample : samples) {
+      sample = static_cast<uint16_t>(analogReadMilliVolts(_adcPin));
+      delayMicroseconds(200);
+    }
+    std::sort(std::begin(samples), std::end(samples));
+    uint32_t sum = 0;
+    for (int i = 2; i < 14; ++i) sum += samples[i];
+    mv = static_cast<uint16_t>((sum + 6) / 12);
   } else {
     mv = analogReadMilliVolts(_adcPin);
   }
@@ -498,6 +515,30 @@ bool BatteryMonitor::isCharging() const {
     Status status;
     return readM5Pm1Status(status) && status.chargingKnown && status.charging;
   }
+#if FREEINK_DEVICE_UT37
+  if (BoardConfig::ACTIVE.board == BoardConfig::Board::Ut37) {
+    // No charger STAT pin on UT37 (the WB6058C STAT only drives LED2). A USB host
+    // means VBUS is present; otherwise infer charging like the OEM firmware: the
+    // last readings keep rising by more than 29 mV in total.
+    if (usb_serial_jtag_is_connected()) return true;
+    static uint16_t history[5] = {};
+    static uint8_t count = 0;
+    static unsigned long lastSampleMs = 0;
+    const unsigned long now = millis();
+    if (count == 0 || now - lastSampleMs >= 20000) {  // one sample per 20 s
+      if (count == 5) {
+        for (int i = 0; i < 4; ++i) history[i] = history[i + 1];
+        count = 4;
+      }
+      history[count++] = readMillivolts();
+      lastSampleMs = now;
+    }
+    if (count < 3) return false;
+    int rises = 0;
+    for (int i = 1; i < count; ++i) rises += history[i] > history[i - 1] ? 1 : 0;
+    return rises >= count - 2 && history[count - 1] > history[0] + 29;
+  }
+#endif
   if (_chargeStatusPin < 0) {
     return false;
   }
@@ -579,7 +620,37 @@ constexpr uint16_t LIION_NOTCH_MV[11] = {
 // well under the narrowest half-segment (10 mV) so no notch can become a trap.
 constexpr uint16_t NOTCH_HYSTERESIS_MV = 8;
 
+#if FREEINK_DEVICE_UT37
+// OEM UT37 firmware table (firmware10020.bin @0x3c1522cc), interpolated linearly
+// between points: <=3300 mV = 0 %, >=4200 mV = 100 %.
+struct Ut37CurvePoint {
+  uint16_t mv;
+  uint8_t percent;
+};
+constexpr Ut37CurvePoint UT37_CURVE[] = {{3300, 0},  {3450, 5},  {3600, 10}, {3680, 20}, {3740, 30},
+                                         {3790, 40}, {3830, 50}, {3870, 60}, {3920, 70}, {3980, 80},
+                                         {4060, 90}, {4150, 95}, {4200, 100}};
+
+static uint16_t ut37PercentFromMillivolts(uint16_t mv) {
+  if (mv <= UT37_CURVE[0].mv) return 0;
+  constexpr size_t last = sizeof(UT37_CURVE) / sizeof(UT37_CURVE[0]) - 1;
+  if (mv >= UT37_CURVE[last].mv) return 100;
+  for (size_t i = 1; i <= last; ++i) {
+    if (mv < UT37_CURVE[i].mv) {
+      const auto& lo = UT37_CURVE[i - 1];
+      const auto& hi = UT37_CURVE[i];
+      const uint32_t span = hi.mv - lo.mv;
+      return static_cast<uint16_t>(lo.percent + ((mv - lo.mv) * (hi.percent - lo.percent) + span / 2) / span);
+    }
+  }
+  return 100;
+}
+#endif
+
 uint16_t BatteryMonitor::percentageFromMillivolts(uint16_t millivolts) {
+#if FREEINK_DEVICE_UT37
+  if (BoardConfig::ACTIVE.board == BoardConfig::Board::Ut37) return ut37PercentFromMillivolts(millivolts);
+#endif
   // A failed read reports 0 mV, which lands on 0% here. That is deliberate: the
   // cubic this table replaced evaluated to +7501 at 0 V and clamped to a
   // confident 100%, so an I2C or ADC failure showed a full battery.
@@ -594,6 +665,15 @@ uint16_t BatteryMonitor::percentageFromMillivolts(uint16_t millivolts) {
 }
 
 uint16_t BatteryMonitor::percentageFromMillivolts(uint16_t millivolts, uint16_t previousPercent) {
+#if FREEINK_DEVICE_UT37
+  if (BoardConfig::ACTIVE.board == BoardConfig::Board::Ut37) {
+    // 1 % resolution: hold the shown value unless it moves by more than 1 %, so
+    // sampler noise doesn't flick the number between page turns.
+    const uint16_t now = ut37PercentFromMillivolts(millivolts);
+    if (previousPercent > 100) return now;
+    return (now + 1 >= previousPercent && now <= previousPercent + 1) ? previousPercent : now;
+  }
+#endif
   const uint16_t notch = percentageFromMillivolts(millivolts);
   if (previousPercent > 100) return notch;  // no usable history
   const uint16_t previousNotch = static_cast<uint16_t>((previousPercent / 10) * 10);

@@ -1772,7 +1772,15 @@ void InputManager::pollFt5x06(const unsigned long now) {
   // level must not be treated as a release (that splits one swipe into a
   // phantom tap plus a swipe). Idle fast-path gate only; while a contact is
   // live, the TD_STATUS zero-contact frame below is the release authority.
+#if FREEINK_DEVICE_UT37
+  // UT37's pulses are short enough that a poll often lands between them, so
+  // the gate recorded touch-down several reports late, well past the edge
+  // bands of back/menu swipes. Read every sample instead (~1 ms of 100 kHz
+  // I2C per 8 ms while awake; idle light sleep stops this loop).
+  const bool irqDown = true;
+#else
   const bool irqDown = t.irq < 0 || digitalRead(t.irq) == LOW;
+#endif
   if (!irqDown && !touchPressed) {
     return;
   }

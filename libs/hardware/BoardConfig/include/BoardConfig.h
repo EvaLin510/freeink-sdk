@@ -1105,7 +1105,9 @@ constexpr BoardProfile UT37 = {
     416,  // landscape framebuffer, same convention as the Murphy M3 driver
     240,
     {4, 5, 3, 2, 0, 1, PIN_UNASSIGNED},  // sclk, mosi, cs, dc, rst, busy
-    0,
+    // 16 MHz: X3 runs the same UC8253 at 16-20 MHz (datasheet max 20 MHz); the
+    // Murphy driver's 4 MHz default made each 2x12.5 KB plane transfer ~50 ms.
+    16000000,
     // GPIO42 (TOUCH_WAKE/SD_WAKE) -> R4 -> Q1 gate: Q1 grounds the SD card (SD_GND). Active-HIGH.
     {PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, 42, false, 0, true},
     // back, confirm, left, right, up, down, power, powerActiveHigh

@@ -29,6 +29,13 @@ class SdmmcBlockDevice : public FsBlockDeviceInterface {
   // card. Returns false (and leaves the device unusable) on any failure.
   bool begin(const BoardConfig::SdmmcPins& pins);
   void end() override;
+  // Hot-plug support for boards without a card-detect pin. cardResponding()
+  // sends CMD13 to the mounted card; it fails once the card is pulled (or was
+  // swapped, since a fresh card has not been assigned the old RCA).
+  // probeReinsertedCard() re-runs card init on the still-configured host
+  // without the power-enable cycle, so a shared rail (UT37 touch) is untouched.
+  bool cardResponding();
+  bool probeReinsertedCard();
 
   bool isBusy() override { return false; }
   bool readSector(Sector_t sector, uint8_t* dst) override { return readSectors(sector, dst, 1); }

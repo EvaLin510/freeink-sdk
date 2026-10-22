@@ -14,6 +14,14 @@
 
 namespace freeink {
 
+namespace {
+sdmmc_host_t makeHost() {
+  sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+  host.max_freq_khz = SDMMC_FREQ_DEFAULT;  // 40 MHz
+  return host;
+}
+}  // namespace
+
 bool SdmmcBlockDevice::begin(const BoardConfig::SdmmcPins& pins) {
   if (pins.busWidth == 0) return false;
 
@@ -21,8 +29,7 @@ bool SdmmcBlockDevice::begin(const BoardConfig::SdmmcPins& pins) {
   // default capability flags (0x37) with the actual width selected via slot.width
   // only, and the data clock at 40 MHz. The read timeouts we chased earlier were a
   // mount-sequencing problem, not a clock-margin one — see the retry loop below.
-  sdmmc_host_t host = SDMMC_HOST_DEFAULT();
-  host.max_freq_khz = SDMMC_FREQ_DEFAULT;  // 40 MHz
+  sdmmc_host_t host = makeHost();
 
   // Slot pin map. The ESP32-S3 routes SDMMC through the GPIO matrix, so the data
   // and clock/command lines are assignable (unlike the classic ESP32's fixed slot).
@@ -88,10 +95,13 @@ bool SdmmcBlockDevice::begin(const BoardConfig::SdmmcPins& pins) {
       // Polarity-aware power cycle: OFF level, wait, then ON level (held while running).
       // Active-LOW boards (X4 Pro/X4C) behave exactly as before: HIGH -> LOW.
       const bool sdOnHigh = BoardConfig::ACTIVE.sd.powerActiveHigh;
+      // UT37's low-side SD_GND switch (Q1) settles fast: 20 ms off / 50 ms on is still
+      // well past the SD spec's 35 ms power-up ramp and trims ~130 ms from cold boot.
+      const bool fastGate = BoardConfig::ACTIVE.board == BoardConfig::Board::Ut37;
       digitalWrite(sdPwr, sdOnHigh ? LOW : HIGH);
-      delay(80);
+      delay(fastGate ? 20 : 80);
       digitalWrite(sdPwr, sdOnHigh ? HIGH : LOW);
-      delay(120);
+      delay(fastGate ? 50 : 120);
     }
     esp_err_t e = sdmmc_card_init(&host, card);
     if (e != ESP_OK && card->csd.capacity == 0) {
@@ -158,6 +168,21 @@ bool SdmmcBlockDevice::writeSectors(Sector_t sector, const uint8_t* src, size_t 
     ns -= count;
   }
   return true;
+}
+
+bool SdmmcBlockDevice::cardResponding() {
+  return _card && sdmmc_get_status(static_cast<sdmmc_card_t*>(_card)) == ESP_OK;
+}
+
+bool SdmmcBlockDevice::probeReinsertedCard() {
+  // Needs the host and slot begin() configured; end() releases them.
+  if (!_card || !_dmaBuffer) return false;
+  auto* card = static_cast<sdmmc_card_t*>(_card);
+  // With no card the first command hits the host's hardware response timeout,
+  // so this returns in milliseconds. A card inserted into a powered socket is
+  // already fresh from power-up, which is all the begin() power cycle provides.
+  const sdmmc_host_t host = makeHost();
+  return sdmmc_card_init(&host, card) == ESP_OK && sdmmc_read_sectors(card, _dmaBuffer, 0, 1) == ESP_OK;
 }
 
 Sector_t SdmmcBlockDevice::sectorCount() {

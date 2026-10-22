@@ -100,12 +100,21 @@ class SDCardManager {
   void shutdown() {}
 #endif
 
+  enum class CardChange : uint8_t { None, Removed, Reinserted };
+  // Hot-plug check for boards without a card-detect pin; call periodically
+  // with filesystem access serialized. Reports Removed once when the mounted
+  // card stops answering, then Reinserted once a card answers again. The
+  // volume is NOT remounted: open files and SD fonts still reference the old
+  // mount, so the caller restarts. SPI boards always report None.
+  CardChange pollCardChange();
+
   static SDCardManager& getInstance() { return instance; }
 
  private:
   static SDCardManager instance;
 
   bool initialized = false;
+  bool cardLost = false;  // pollCardChange(): mounted card stopped answering
   PowerHook _powerHook = nullptr;
 
   static constexpr uint32_t USED_BYTES_CACHE_TTL_MS = 20000;
