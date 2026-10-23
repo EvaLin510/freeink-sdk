@@ -260,6 +260,20 @@ void EpdBus::waitBusy(BusyPolarity p, const char* tag) {
         if (millis() - start > 30000) break;
       } while (digitalRead(_pins.busy) == LOW);
     }
+  } else if (p == BusyPolarity::IdleHigh) {
+    // Level wait for a controller that may already be idle: unlike ActiveLow it
+    // does not spend up to 100 ms looking for a LOW edge that never comes.
+    while (digitalRead(_pins.busy) == LOW) {
+      busyIdle(longWait, LOW, 1);
+      if (!longWait && millis() - start > BUSY_WAIT_HOOK_THRESHOLD_MS) {
+        longWait = true;
+        if (_busyWaitBeginHook != nullptr) {
+          hookFired = true;
+          _busyWaitBeginHook();
+        }
+      }
+      if (millis() - start > 30000) break;
+    }
   } else if (p == BusyPolarity::UcIdleHigh) {
     // X4 Pro UC8179/UC8279 production behavior: allow one RTOS tick for the
     // command to take effect, then wait only for the documented idle level.

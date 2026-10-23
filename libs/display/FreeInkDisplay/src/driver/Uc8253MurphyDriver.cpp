@@ -187,10 +187,13 @@ void Uc8253MurphyDriver::initControllerUt37(EpdBus& bus) {
 // ready as soon as BUSY goes high (vendor XZ035B reference: RESET, then READBUSY;
 // measured on hardware: BUSY high within 0-1 ms), so it waits on BUSY instead and
 // saves ~190 ms on every refresh, since the driver resets before each one.
+// The level wait (IdleHigh) matters: the ActiveLow wait first looks up to
+// 100 ms for BUSY to drop, and an idle panel after reset never drops it, so
+// every refresh paid the full 100 ms (logged as "UT37_RST (100 ms)").
 void Uc8253MurphyDriver::resetController(EpdBus& bus) {
   if (BoardConfig::ACTIVE.board == BoardConfig::Board::Ut37) {
     bus.reset(0);
-    bus.waitBusy(" UT37_RST");
+    bus.waitBusy(BusyPolarity::IdleHigh, " UT37_RST");
     return;
   }
   bus.reset(200);
