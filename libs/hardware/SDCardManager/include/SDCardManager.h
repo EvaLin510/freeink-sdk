@@ -33,6 +33,9 @@ class SDCardManager {
   SDCardManager();
   bool begin();
   bool ready() const;
+  // True when the last failed begin() found a BitLocker-encrypted volume
+  // (Windows "encrypt this drive" while the card was on a PC). SPI: always false.
+  bool bitLockerDetected() const { return bitLocker; }
   // Filesystem data capacity, not raw card size. Outputs are zero on failure.
   // Successful free-space scans are cached for 20 seconds. Caller serializes access.
   bool getSpace(uint64_t& totalBytes, uint64_t& freeBytes);
@@ -115,6 +118,7 @@ class SDCardManager {
 
   bool initialized = false;
   bool cardLost = false;  // pollCardChange(): mounted card stopped answering
+  bool bitLocker = false;  // begin(): mount failed on a BitLocker volume
   PowerHook _powerHook = nullptr;
 
   static constexpr uint32_t USED_BYTES_CACHE_TTL_MS = 20000;

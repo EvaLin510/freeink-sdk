@@ -11,6 +11,7 @@
 #include <cstring>
 
 extern "C" bool tud_mounted(void);
+extern "C" bool tud_suspended(void);
 extern "C" bool tud_disconnect(void);
 
 namespace freeink {
@@ -128,6 +129,7 @@ bool UsbMassStorage::begin(FsBlockDeviceInterface* dev) {
   gOwner.store(this);
   _state.store(UsbMassStorageState::WaitingForHost);
   _hostSeen.store(false);
+  _suspendedSince = 0;
   gMsc.vendorID("FreeInk");
   gMsc.productID("SD Card");
   gMsc.productRevision("1.0");
@@ -178,6 +180,22 @@ UsbMassStorageState UsbMassStorage::state() const {
   if (current == UsbMassStorageState::IoError) return current;
 
   _hostSeen.store(true);
+
+  // Windows "Safely Remove Hardware" sends no SCSI START STOP UNIT; it disables
+  // the hub port, which the device only sees as a bus suspend while it stays
+  // configured. Treat a sustained suspend of the mounted disk as an eject.
+  if (tud_suspended()) {
+    const uint32_t now = millis();
+    if (_suspendedSince == 0) {
+      _suspendedSince = now != 0 ? now : 1;
+    } else if (now - _suspendedSince >= kSuspendEjectMs) {
+      _state.store(UsbMassStorageState::Ejected);
+      return UsbMassStorageState::Ejected;
+    }
+  } else {
+    _suspendedSince = 0;
+  }
+
   auto expected = UsbMassStorageState::WaitingForHost;
   _state.compare_exchange_strong(expected, UsbMassStorageState::Connected);
   return _state.load();

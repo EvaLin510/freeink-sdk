@@ -7,6 +7,7 @@
 #include <BoardConfig.h>
 
 #include <atomic>
+#include <cstdint>
 
 namespace freeink {
 
@@ -50,6 +51,9 @@ class UsbMassStorage {
   // best-effort byte-sized write.
   mutable std::atomic<UsbMassStorageState> _state{UsbMassStorageState::Idle};
   mutable std::atomic<bool> _hostSeen{false};
+  // state() runs only from the app task, so the suspend timer needs no atomic.
+  static constexpr uint32_t kSuspendEjectMs = 2000;
+  mutable uint32_t _suspendedSince = 0;  // millis() when a mounted-bus suspend began; 0 = not suspended
   bool _active = false;
 };
 

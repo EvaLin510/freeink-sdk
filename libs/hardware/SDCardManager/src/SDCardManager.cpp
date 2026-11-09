@@ -5,6 +5,7 @@
 #include <driver/gpio.h>
 #include <esp_task_wdt.h>
 
+#include <cstring>
 #include <new>
 
 #include "SdmmcBlockDevice.h"  // no-op unless FREEINK_SD_SDMMC
@@ -22,6 +23,31 @@ uint64_t volumeTotalBytes(FsVolume& volume) {
   // SdFat 2.3.1's FAT bytesPerCluster() narrows 64 KiB to zero. Both backends use 512-byte sectors.
   return static_cast<uint64_t>(volume.clusterCount()) * sectorsPerCluster * 512;
 }
+
+#if FREEINK_SD_SDMMC
+// BitLocker rewrites the volume boot sector: NTFS/exFAT volumes get the
+// "-FVE-FS-" OEM ID, while FAT volumes (BitLocker To Go) keep "MSWIN4.1" and
+// carry the BitLocker GUID 4967D63B-2E29-4AD8-8399-F6A339E3D001 at offset 424.
+bool isBitLockerBootSector(const uint8_t* sector) {
+  static constexpr uint8_t kBitLockerGuid[16] = {0x3B, 0xD6, 0x67, 0x49, 0x29, 0x2E, 0xD8, 0x4A,
+                                                 0x83, 0x99, 0xF6, 0xA3, 0x39, 0xE3, 0xD0, 0x01};
+  return memcmp(sector + 3, "-FVE-FS-", 8) == 0 || memcmp(sector + 424, kBitLockerGuid, 16) == 0;
+}
+
+// Read-only probe run only after a failed mount: checks an unpartitioned card's
+// sector 0, else the first MBR partition's boot sector. The 512-byte buffer is
+// on the stack because this runs once from setup and returns immediately.
+bool cardHoldsBitLockerVolume(FsBlockDeviceInterface& dev) {
+  uint8_t sector[512];
+  if (!dev.readSector(0, sector)) return false;
+  if (isBitLockerBootSector(sector)) return true;
+  if (sector[510] != 0x55 || sector[511] != 0xAA) return false;
+  uint32_t firstLba;
+  memcpy(&firstLba, sector + 0x1BE + 8, sizeof(firstLba));  // partition entry 0, little-endian LBA start
+  if (firstLba == 0 || !dev.readSector(firstLba, sector)) return false;
+  return isBitLockerBootSector(sector);
+}
+#endif
 }  // namespace
 
 #if FREEINK_SD_SDMMC
@@ -62,8 +88,11 @@ bool SDCardManager::begin() {
     cachedUsedBytesValid = false;
     return false;
   }
+  bitLocker = false;
   if (!_vol.begin(_dev)) {
-    if (Serial) Serial.printf("[%lu] [SD] SDMMC volume mount failed\n", millis());
+    bitLocker = cardHoldsBitLockerVolume(*_dev);
+    if (Serial)
+      Serial.printf("[%lu] [SD] SDMMC volume mount failed%s\n", millis(), bitLocker ? " (BitLocker volume)" : "");
     initialized = false;
     cachedTotalBytes = 0;
     cachedUsedBytesValid = false;

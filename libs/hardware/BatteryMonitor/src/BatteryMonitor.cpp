@@ -520,11 +520,25 @@ bool BatteryMonitor::isCharging() const {
     // No charger STAT pin on UT37 (the WB6058C STAT only drives LED2). A USB host
     // means VBUS is present; otherwise infer charging like the OEM firmware: the
     // last readings keep rising by more than 29 mV in total.
-    if (usb_serial_jtag_is_connected()) return true;
     static uint16_t history[5] = {};
     static uint8_t count = 0;
+    if (usb_serial_jtag_is_connected()) {
+      // Pre-plug readings would look like a rise once the host is gone; restart
+      // the trend so unplugging reads as not charging right away.
+      count = 0;
+      return true;
+    }
     static unsigned long lastSampleMs = 0;
+    static unsigned long lastDropCheckMs = 0;
+    static bool lastCharging = false;
     const unsigned long now = millis();
+    // Unplugging drops the cell off the charger's voltage at once; while charging
+    // is reported, check about once a second so the icon clears without waiting
+    // for the next 20 s trend sample. A drop restarts the trend from the new level.
+    if (lastCharging && count > 0 && now - lastDropCheckMs >= 1000) {
+      lastDropCheckMs = now;
+      if (readMillivolts() + 50 < history[count - 1]) count = 0;
+    }
     if (count == 0 || now - lastSampleMs >= 20000) {  // one sample per 20 s
       if (count == 5) {
         for (int i = 0; i < 4; ++i) history[i] = history[i + 1];
@@ -533,10 +547,10 @@ bool BatteryMonitor::isCharging() const {
       history[count++] = readMillivolts();
       lastSampleMs = now;
     }
-    if (count < 3) return false;
+    if (count < 3) return lastCharging = false;
     int rises = 0;
     for (int i = 1; i < count; ++i) rises += history[i] > history[i - 1] ? 1 : 0;
-    return rises >= count - 2 && history[count - 1] > history[0] + 29;
+    return lastCharging = rises >= count - 2 && history[count - 1] > history[0] + 29;
   }
 #endif
   if (_chargeStatusPin < 0) {
